@@ -1,0 +1,437 @@
+#------------------------------------------------------------------------------
+# 
+substitutions:
+  unitname: hottubcontroller
+  prefix: HTC
+
+  # Inputs
+  inp_motor_cold:       GPIO36
+  inp_motor_hot:        GPIO39
+  inp_kb_on:            GPIO27
+  inp_kb_page:          GPIO14
+  inp_kb_inc:           GPIO12
+  inp_kb_dec:           GPIO13
+  inp_sensor_water:     GPIO5
+  inp_sensor_hottub:    GPIO34
+  inp_sensor_extra:     GPIO35
+  inp_sensor_temp_int:  GPIO17
+  inp_sensor_hum_int:   GPIO16
+
+  # Outputs
+  outp_buzzer:          GPIO19
+  outp_led:             GPIO0
+  outp_motor_hot:       GPIO25
+  outp_motor_cold:      GPIO26
+  outp_disp_blank:      GPIO15
+
+  # Other
+  spi_clock:            GPIO18
+  spi_mosi:             GPIO23
+  
+  # String definitions
+  STR_BTN_ON:           ${prefix} System ON
+  STR_BTN_FLOW_INC:     ${prefix} Increment Flow
+  STR_BTN_FLOW_DEC:     ${prefix} Decrement Flow
+  STR_BTN_TEMP_INC:     ${prefix} Increment Temperature
+  STR_BTN_TEMP_DEC:     ${prefix} Decrement Temperature
+  STR_BTN_PID_ATUNE:    ${prefix} PID Autotune
+
+  STR_SENSOR_TAR_FLOW:  ${prefix} Target Flow
+  STR_SENSOR_CUR_FLOW:  ${prefix} Current Flow
+  STR_SENSOR_HOT_FLOW:  ${prefix} Hot Water Flow
+  STR_SENSOR_CLD_FLOW:  ${prefix} Cold Water Flow
+
+  #STR_SENSOR_TAR_TEMP:  ${prefix} Target Temperature
+  STR_SENSOR_CUR_TEMP:  ${prefix} Current Temperature
+
+  STR_SENSOR_MOT_HOT:   ${prefix} Hot Motor Fb Voltage
+  STR_SENSOR_MOT_COLD:  ${prefix} Cold Motor Fb Voltage
+  
+  STR_INTERNAL_TEMP:    ${prefix} Internal Temperature
+  STR_INTERNAL_HUM:     ${prefix} Internal Humidity
+
+  STR_CLIMATE_PID:      ${prefix} PID Control
+
+esphome:
+  name: ${unitname}
+  platform: ESP32
+  board: esp-wrover-kit
+#  includes:
+#    - display_controller.h
+
+#  libraries:
+#    - TFT_eSPI
+
+wifi:
+  <<: !include ../wifi.yaml
+
+  ap:
+    ssid: "Hottubcontroller"
+    password: "xbYrFEfkApV8"
+
+captive_portal:
+
+logger:
+  level: INFO
+
+api:
+#i2c:
+ota:
+
+web_server:
+  port: 80
+
+globals:
+  # Constant
+  - id: per2volt
+    type: float
+    initial_value: '0.0075'
+
+  - id: volt2per
+    type: float
+    initial_value: '36.635'
+
+  - id: deltaTemp
+    type: float
+    initial_value: '0.2'
+    
+  - id: max_temperature
+    type: float
+    initial_value: '55'
+
+  # Percentage 0...100
+  - id: hot_flow
+    type: float
+    restore_value: no
+    initial_value: '0'
+
+  # Percentage 0...100
+  - id: cold_flow
+    type: float
+    restore_value: no
+    initial_value: '0'
+
+  # Degrees 10...45
+  - id: target_deg_s
+    type: float
+    restore_value: yes
+    initial_value: '39'
+
+  # Percentage 0...100
+  - id: target_level_s
+    type: float
+    restore_value: yes
+    initial_value: '60'
+
+
+dallas:
+  - id: htc_output_temperature
+    pin: ${inp_sensor_water}
+    update_interval: 1s
+#  - id: hottub_temperature
+#    pin: ${inp_sensor_hottub}
+    
+output:
+  - platform: esp32_dac
+    pin: ${outp_motor_hot}
+    id: htc_dac_motor_hot
+
+  - platform: esp32_dac
+    pin: ${outp_motor_cold}
+    id: htc_dac_motor_cold
+    
+  - platform: gpio
+    pin: ${outp_buzzer}
+    id: gpio_buzzer
+
+  - platform: gpio
+    pin: ${outp_led}
+    id: gpio_led
+
+  - platform: template
+    type: float
+    id: htc_motor_hot
+    write_action:
+      - if:
+          condition:
+            lambda: return (id(htc_pid_ctrl).mode == CLIMATE_MODE_OFF);
+          then:
+            lambda: id(htc_dac_motor_hot).set_level(0);
+          else:
+            lambda: |- 
+              if (id(htc_current_temp).state < id(max_temperature)) {
+                float v = state + 0.465;
+                if (v > 1) v = 1;
+                id(htc_dac_motor_hot).set_level(v);
+              }
+              else {
+                id(htc_dac_motor_hot).set_level(0);
+                id(htc_dac_motor_cold).set_level(1);
+              }
+         
+  - platform: template
+    type: float
+    id: htc_motor_cold
+    write_action:
+      - if:
+          condition:
+            lambda: return (id(htc_pid_ctrl).mode == CLIMATE_MODE_OFF);
+          then:
+            lambda: id(htc_dac_motor_cold).set_level(0);
+          else:
+            lambda: |- 
+              if (id(htc_current_temp).state < id(max_temperature)) {
+                float v = state + 0.465;
+                if (v > 1) v = 1;
+                id(htc_dac_motor_cold).set_level(v);
+              }
+              else {
+                id(htc_dac_motor_hot).set_level(0);
+                id(htc_dac_motor_cold).set_level(1);
+              }
+    
+
+switch:
+  #-----------------------------------------------------------------------------
+  # System on/off button
+  #- platform: template
+  #  name: ${STR_BTN_ON}
+  #  id: htc_system_on
+  #  optimistic: true
+  #  on_turn_on:
+  #    then:
+  #      - climate.control:
+  #          id: htc_pid_ctrl
+  #          mode: "OFF"
+  #      - lambda: |- 
+  #          id(htc_target_temp).publish_state(id(target_deg_s));
+  #          id(htc_target_flow_percentge).publish_state((id(hot_flow) + id(cold_flow))/2);
+  #          id(htc_dac_motor_hot).set_level(id(hot_flow) * id(per2volt));
+  #          id(htc_dac_motor_cold).set_level(id(cold_flow) * id(per2volt));
+  #  on_turn_off:
+  #    then:
+  #      - climate.control:
+  #          id: htc_pid_ctrl
+  #          mode: "OFF"
+  #      - lambda: |- 
+  #          id(htc_dac_motor_hot).set_level(0);
+  #          id(htc_dac_motor_cold).set_level(0);
+    
+
+  #-----------------------------------------------------------------------------
+  # Flow control
+  #- platform: template
+  #  name: ${STR_BTN_FLOW_INC}
+  #  id: htc_increment_flow
+  #  optimistic: true
+  #  on_turn_on:
+  #    then:
+  #      - lambda: |-
+  #          if (id(htc_pid_ctrl).mode != OFF) {
+  #            id(hot_flow) += 5; 
+  #            id(cold_flow) += 5;
+  #            id(htc_target_flow_percentge).publish_state((id(hot_flow) + id(cold_flow))/2);
+  #            id(htc_dac_motor_hot).set_level(id(hot_flow) * id(per2volt));
+  #            id(htc_dac_motor_cold).set_level(id(cold_flow) * id(per2volt));
+  #          }
+  #      - delay: 500ms
+  #      - switch.turn_off: htc_increment_flow
+
+  #- platform: template
+  #  name: ${STR_BTN_FLOW_DEC}
+  #  id: htc_decrement_flow
+  #  optimistic: true
+  #  on_turn_on:
+  #    then:
+  #      - lambda: |- 
+  #          if (id(htc_pid_ctrl).mode != OFF) {
+  #            id(hot_flow) -= 5; 
+  #            id(cold_flow) -= 5;
+  #            id(htc_target_flow_percentge).publish_state((id(hot_flow) + id(cold_flow))/2);
+  #            id(htc_dac_motor_hot).set_level(id(hot_flow) * id(per2volt));
+  #            id(htc_dac_motor_cold).set_level(id(cold_flow) * id(per2volt));
+  #          }
+  #      - delay: 500ms
+  #      - switch.turn_off: htc_decrement_flow
+
+
+  #-----------------------------------------------------------------------------
+  # Temperature control
+  #- platform: template
+  #  name: ${STR_BTN_TEMP_INC}
+  #  id: htc_increment_temperature
+  #  optimistic: true
+  #  on_turn_on:
+  #    then:
+  #      - lambda: |-
+  #          if (id(htc_pid_ctrl).mode != OFF) {
+  #            id(target_deg_s) += id(deltaTemp);
+  #            id(htc_target_temp).publish_state(id(target_deg_s));
+  #            id(hot_flow) += 2.5; 
+  #            id(cold_flow) -= 2.5;
+  #            id(htc_target_flow_percentge).publish_state((id(hot_flow) + id(cold_flow))/2);
+  #            id(htc_dac_motor_hot).set_level(id(hot_flow) * id(per2volt));
+  #            id(htc_dac_motor_cold).set_level(id(cold_flow) * id(per2volt));
+  #          }
+  #      - delay: 500ms
+  #      - switch.turn_off: htc_decrement_temperature
+
+  #- platform: template
+  #  name: ${STR_BTN_TEMP_DEC}
+  #  id: htc_decrement_temperature
+  #  optimistic: true
+  #  on_turn_on:
+  #    then:
+  #      - lambda: |-
+  #          if (id(htc_pid_ctrl).mode != OFF) {
+  #            id(target_deg_s) -= id(deltaTemp);
+  #            id(htc_target_temp).publish_state(id(target_deg_s));
+  #            id(hot_flow) -= 2.5; 
+  #            id(cold_flow) += 2.5;
+  #            id(htc_target_flow_percentge).publish_state((id(hot_flow) + id(cold_flow))/2);
+  #            id(htc_dac_motor_hot).set_level(id(hot_flow) * id(per2volt));
+  #            id(htc_dac_motor_cold).set_level(id(cold_flow) * id(per2volt));
+  #          }
+  #      - delay: 500ms
+  #      - switch.turn_off: htc_decrement_temperature
+
+  #-----------------------------------------------------------------------------
+  # Temperature control
+  - platform: template
+    name: ${STR_BTN_PID_ATUNE}
+    optimistic: true
+    turn_on_action:
+      - climate.pid.autotune: htc_pid_ctrl
+      
+#binary_sensor:
+#  - platform: template
+#    id: htc_overheat_alarm
+#    device_class: heat
+#    lambda: return id(htc_current_temp).state > 47;
+
+sensor:
+  #-----------------------------------------------------------------------------
+  # Target flow
+  - platform: template
+    id: htc_target_flow_percentge
+    name: ${STR_SENSOR_TAR_FLOW}
+    unit_of_measurement: '%'
+    
+  # Current flow  
+  - platform: template
+    id: htc_current_flow_percentage
+    name: ${STR_SENSOR_CUR_FLOW}
+    unit_of_measurement: '%'
+
+  # Current hot flow  
+  - platform: template
+    id: htc_hot_flow_percentage
+    name: ${STR_SENSOR_HOT_FLOW}
+    unit_of_measurement: '%'
+
+  # Current cold flow  
+  - platform: template
+    id: htc_cold_flow_percentage
+    name: ${STR_SENSOR_CLD_FLOW}
+    unit_of_measurement: '%'
+
+
+  #-----------------------------------------------------------------------------
+  # Target and current temperature
+  #- platform: template
+  #  id: htc_target_temp
+  #  name: ${STR_SENSOR_TAR_TEMP}
+  #  device_class: temperature
+  #  unit_of_measurement: '°C'
+
+  - platform: dallas
+    id: htc_current_temp
+    address: 0xA80008039D1DC610
+    name: ${STR_SENSOR_CUR_TEMP}
+ #   on_value_range:
+#      above: 50.0
+#      then:
+#        - climate.control:
+#            id: htc_pid_ctrl
+#            mode: "OFF"
+
+
+  #-----------------------------------------------------------------------------
+  # Motor control feedback
+  - platform: adc
+    pin: ${inp_motor_cold}
+    name: ${STR_SENSOR_MOT_COLD}
+    id: htc_adc_motor_cold
+    attenuation: 11db
+    update_interval: 1s
+    on_value:
+      then:
+        lambda: |-
+          id(htc_current_flow_percentage).publish_state((id(htc_adc_motor_cold).state + id(htc_adc_motor_hot).state)/2 * id(volt2per));
+          id(htc_cold_flow_percentage).publish_state(id(htc_adc_motor_cold).state * id(volt2per));
+
+
+  - platform: adc
+    pin: ${inp_motor_hot}
+    name: ${STR_SENSOR_MOT_HOT}
+    id: htc_adc_motor_hot
+    attenuation: 11db
+    update_interval: 1s
+    on_value:
+      then:
+        lambda: |-
+          id(htc_current_flow_percentage).publish_state((id(htc_adc_motor_cold).state + id(htc_adc_motor_hot).state)/2 * id(volt2per));
+          id(htc_hot_flow_percentage).publish_state(id(htc_adc_motor_hot).state * id(volt2per));
+    
+
+  #-----------------------------------------------------------------------------
+  # Inhouse values
+  - platform: dht
+    pin: ${inp_sensor_hum_int}
+    id: board_sensor
+    temperature:
+      name: ${STR_INTERNAL_TEMP}
+      id: inhouse_temperature
+    humidity:
+      name: ${STR_INTERNAL_HUM}
+      id: inhouse_humidity
+    update_interval: 10s
+
+
+climate:
+  - platform: pid
+    name: ${STR_CLIMATE_PID}
+    id: htc_pid_ctrl
+    sensor: htc_current_temp
+    default_target_temperature: 40°C
+    heat_output: htc_motor_hot
+    cool_output: htc_motor_cold
+    control_parameters:
+      kp: 0.15
+      ki: 0.01128
+      kd: 1.87726
+
+#      kp: 0.29103
+#      ki: 0.01128
+#      kd: 1.87726
+
+    visual:
+      min_temperature: 30 °C
+      max_temperature: 47 °C
+      temperature_step: 0.1 °C
+    
+  
+script:
+  - id: fill_timeout
+    mode: restart   
+    then:
+      - delay: 30 min
+      - lambda: id(htc_pid_ctrl).mode = CLIMATE_MODE_OFF;
+      
+      
+      
+      
+      
+      
+      
+      
