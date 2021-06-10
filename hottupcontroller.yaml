@@ -51,6 +51,8 @@ substitutions:
   STR_INTERNAL_HUM:     ${prefix} Internal Humidity
 
   STR_CLIMATE_PID:      ${prefix} PID Control
+  
+  STR_UI_FLOW_TIMEOUT:  ${prefix} Flow Timeout
 
 esphome:
   name: ${unitname}
@@ -78,8 +80,8 @@ api:
 #i2c:
 ota:
 
-web_server:
-  port: 80
+#web_server:
+#  port: 80
 
 globals:
   # Constant
@@ -160,14 +162,16 @@ output:
           else:
             lambda: |- 
               if (id(htc_current_temp).state < id(max_temperature)) {
-                float v = state + 0.465;
+                float v = state + id(htc_flow_strength).state/100.0;
                 if (v > 1) v = 1;
                 id(htc_dac_motor_hot).set_level(v);
               }
               else {
+                ESP_LOGW("custom", "Overheating - cooling triggered");
                 id(htc_dac_motor_hot).set_level(0);
                 id(htc_dac_motor_cold).set_level(1);
               }
+      - script.execute: run_timeout
          
   - platform: template
     type: float
@@ -181,120 +185,19 @@ output:
           else:
             lambda: |- 
               if (id(htc_current_temp).state < id(max_temperature)) {
-                float v = state + 0.465;
+                float v = state + id(htc_flow_strength).state/100;
                 if (v > 1) v = 1;
                 id(htc_dac_motor_cold).set_level(v);
               }
               else {
+                ESP_LOGW("custom", "Overheating - cooling triggered");
                 id(htc_dac_motor_hot).set_level(0);
                 id(htc_dac_motor_cold).set_level(1);
               }
-    
+      - script.execute: run_timeout
+
 
 switch:
-  #-----------------------------------------------------------------------------
-  # System on/off button
-  #- platform: template
-  #  name: ${STR_BTN_ON}
-  #  id: htc_system_on
-  #  optimistic: true
-  #  on_turn_on:
-  #    then:
-  #      - climate.control:
-  #          id: htc_pid_ctrl
-  #          mode: "OFF"
-  #      - lambda: |- 
-  #          id(htc_target_temp).publish_state(id(target_deg_s));
-  #          id(htc_target_flow_percentge).publish_state((id(hot_flow) + id(cold_flow))/2);
-  #          id(htc_dac_motor_hot).set_level(id(hot_flow) * id(per2volt));
-  #          id(htc_dac_motor_cold).set_level(id(cold_flow) * id(per2volt));
-  #  on_turn_off:
-  #    then:
-  #      - climate.control:
-  #          id: htc_pid_ctrl
-  #          mode: "OFF"
-  #      - lambda: |- 
-  #          id(htc_dac_motor_hot).set_level(0);
-  #          id(htc_dac_motor_cold).set_level(0);
-    
-
-  #-----------------------------------------------------------------------------
-  # Flow control
-  #- platform: template
-  #  name: ${STR_BTN_FLOW_INC}
-  #  id: htc_increment_flow
-  #  optimistic: true
-  #  on_turn_on:
-  #    then:
-  #      - lambda: |-
-  #          if (id(htc_pid_ctrl).mode != OFF) {
-  #            id(hot_flow) += 5; 
-  #            id(cold_flow) += 5;
-  #            id(htc_target_flow_percentge).publish_state((id(hot_flow) + id(cold_flow))/2);
-  #            id(htc_dac_motor_hot).set_level(id(hot_flow) * id(per2volt));
-  #            id(htc_dac_motor_cold).set_level(id(cold_flow) * id(per2volt));
-  #          }
-  #      - delay: 500ms
-  #      - switch.turn_off: htc_increment_flow
-
-  #- platform: template
-  #  name: ${STR_BTN_FLOW_DEC}
-  #  id: htc_decrement_flow
-  #  optimistic: true
-  #  on_turn_on:
-  #    then:
-  #      - lambda: |- 
-  #          if (id(htc_pid_ctrl).mode != OFF) {
-  #            id(hot_flow) -= 5; 
-  #            id(cold_flow) -= 5;
-  #            id(htc_target_flow_percentge).publish_state((id(hot_flow) + id(cold_flow))/2);
-  #            id(htc_dac_motor_hot).set_level(id(hot_flow) * id(per2volt));
-  #            id(htc_dac_motor_cold).set_level(id(cold_flow) * id(per2volt));
-  #          }
-  #      - delay: 500ms
-  #      - switch.turn_off: htc_decrement_flow
-
-
-  #-----------------------------------------------------------------------------
-  # Temperature control
-  #- platform: template
-  #  name: ${STR_BTN_TEMP_INC}
-  #  id: htc_increment_temperature
-  #  optimistic: true
-  #  on_turn_on:
-  #    then:
-  #      - lambda: |-
-  #          if (id(htc_pid_ctrl).mode != OFF) {
-  #            id(target_deg_s) += id(deltaTemp);
-  #            id(htc_target_temp).publish_state(id(target_deg_s));
-  #            id(hot_flow) += 2.5; 
-  #            id(cold_flow) -= 2.5;
-  #            id(htc_target_flow_percentge).publish_state((id(hot_flow) + id(cold_flow))/2);
-  #            id(htc_dac_motor_hot).set_level(id(hot_flow) * id(per2volt));
-  #            id(htc_dac_motor_cold).set_level(id(cold_flow) * id(per2volt));
-  #          }
-  #      - delay: 500ms
-  #      - switch.turn_off: htc_decrement_temperature
-
-  #- platform: template
-  #  name: ${STR_BTN_TEMP_DEC}
-  #  id: htc_decrement_temperature
-  #  optimistic: true
-  #  on_turn_on:
-  #    then:
-  #      - lambda: |-
-  #          if (id(htc_pid_ctrl).mode != OFF) {
-  #            id(target_deg_s) -= id(deltaTemp);
-  #            id(htc_target_temp).publish_state(id(target_deg_s));
-  #            id(hot_flow) -= 2.5; 
-  #            id(cold_flow) += 2.5;
-  #            id(htc_target_flow_percentge).publish_state((id(hot_flow) + id(cold_flow))/2);
-  #            id(htc_dac_motor_hot).set_level(id(hot_flow) * id(per2volt));
-  #            id(htc_dac_motor_cold).set_level(id(cold_flow) * id(per2volt));
-  #          }
-  #      - delay: 500ms
-  #      - switch.turn_off: htc_decrement_temperature
-
   #-----------------------------------------------------------------------------
   # Temperature control
   - platform: template
@@ -303,12 +206,6 @@ switch:
     turn_on_action:
       - climate.pid.autotune: htc_pid_ctrl
       
-#binary_sensor:
-#  - platform: template
-#    id: htc_overheat_alarm
-#    device_class: heat
-#    lambda: return id(htc_current_temp).state > 47;
-
 sensor:
   #-----------------------------------------------------------------------------
   # Target flow
@@ -334,26 +231,14 @@ sensor:
     id: htc_cold_flow_percentage
     name: ${STR_SENSOR_CLD_FLOW}
     unit_of_measurement: '%'
-
+  
 
   #-----------------------------------------------------------------------------
-  # Target and current temperature
-  #- platform: template
-  #  id: htc_target_temp
-  #  name: ${STR_SENSOR_TAR_TEMP}
-  #  device_class: temperature
-  #  unit_of_measurement: '°C'
-
+  # Current temperature
   - platform: dallas
     id: htc_current_temp
     address: 0xA80008039D1DC610
     name: ${STR_SENSOR_CUR_TEMP}
- #   on_value_range:
-#      above: 50.0
-#      then:
-#        - climate.control:
-#            id: htc_pid_ctrl
-#            mode: "OFF"
 
 
   #-----------------------------------------------------------------------------
@@ -369,7 +254,6 @@ sensor:
         lambda: |-
           id(htc_current_flow_percentage).publish_state((id(htc_adc_motor_cold).state + id(htc_adc_motor_hot).state)/2 * id(volt2per));
           id(htc_cold_flow_percentage).publish_state(id(htc_adc_motor_cold).state * id(volt2per));
-
 
   - platform: adc
     pin: ${inp_motor_hot}
@@ -397,6 +281,22 @@ sensor:
       id: inhouse_humidity
     update_interval: 10s
 
+  #-----------------------------------------------------------------------------
+  # Interface values in homeassistant
+  - platform: homeassistant
+    name: ${STR_UI_FLOW_TIMEOUT}
+    entity_id: input_number.htc_flow_timeout
+    id: htc_flow_timeout
+    on_value:
+      then:
+        - script.stop: fill_timeout_script
+        - script.execute: run_timeout
+
+  - platform: homeassistant
+    name: ${STR_UI_FLOW_STRENGTH}
+    entity_id: input_number.htc_flow_strength
+    id: htc_flow_strength
+    
 
 climate:
   - platform: pid
@@ -422,11 +322,32 @@ climate:
     
   
 script:
-  - id: fill_timeout
+  - id: fill_timeout_script
     mode: restart   
     then:
-      - delay: 30 min
-      - lambda: id(htc_pid_ctrl).mode = CLIMATE_MODE_OFF;
+      - delay: !lambda |-
+          float timeout = (id(htc_flow_timeout).state * 1000 * 60); 
+          ESP_LOGI("custom", "Timeout is: %f", timeout);
+          return timeout;
+      - lambda: id(htc_pid_ctrl).mode = CLIMATE_MODE_OFF; ESP_LOGI("custom", "Timeout");
+      
+  - id: run_timeout
+    mode: single
+    then:
+      - lambda: |-
+          if (id(htc_pid_ctrl).mode == CLIMATE_MODE_OFF && id(fill_timeout_script).is_running()) {
+            ESP_LOGI("custom", "Stopping timeout");
+            id(fill_timeout_script).stop();
+          }
+          else if (id(htc_pid_ctrl).mode != CLIMATE_MODE_OFF && !id(fill_timeout_script).is_running()) {
+            ESP_LOGI("custom", "Starting timeout");
+            id(fill_timeout_script).execute();
+          }
+      
+      
+      
+      
+      
       
       
       
