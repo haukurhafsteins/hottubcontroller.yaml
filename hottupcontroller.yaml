@@ -12,7 +12,7 @@ substitutions:
   inp_kb_inc:           GPIO12
   inp_kb_dec:           GPIO13
   inp_sensor_water:     GPIO5
-  inp_sensor_hottub:    GPIO34
+  inp_sensor_hottub:    GPIO32
   inp_sensor_extra:     GPIO35
   inp_sensor_temp_int:  GPIO17
   inp_sensor_hum_int:   GPIO16
@@ -41,11 +41,22 @@ substitutions:
   STR_SENSOR_HOT_FLOW:  ${prefix} Hot Water Flow
   STR_SENSOR_CLD_FLOW:  ${prefix} Cold Water Flow
 
-  #STR_SENSOR_TAR_TEMP:  ${prefix} Target Temperature
+  STR_SENSOR_FLOW_CNTD: ${prefix} Flow countdown
   STR_SENSOR_CUR_TEMP:  ${prefix} Current Temperature
+
+  STR_SENSOR_TUB_TEMP1: ${prefix} Tub Temperature 1
+  STR_SENSOR_TUB_TEMP2: ${prefix} Tub Temperature 2
+  STR_SENSOR_TUB_TEMP3: ${prefix} Tub Temperature 3
+  STR_SENSOR_TUB_TEMP4: ${prefix} Tub Temperature 4
+  STR_SENSOR_TUB_TEMP5: ${prefix} Tub Temperature 5
+  STR_SENSOR_TUB_TEMP6: ${prefix} Tub Temperature 6
+  STR_SENSOR_TUB_TEMP7: ${prefix} Tub Temperature 7
+  STR_SENSOR_TUB_TEMP8: ${prefix} Tub Temperature 8
 
   STR_SENSOR_MOT_HOT:   ${prefix} Hot Motor Fb Voltage
   STR_SENSOR_MOT_COLD:  ${prefix} Cold Motor Fb Voltage
+  
+  STR_SENSOR_UPTIME:    ${prefix} Uptime
   
   STR_INTERNAL_TEMP:    ${prefix} Internal Temperature
   STR_INTERNAL_HUM:     ${prefix} Internal Humidity
@@ -53,6 +64,11 @@ substitutions:
   STR_CLIMATE_PID:      ${prefix} PID Control
   
   STR_UI_FLOW_TIMEOUT:  ${prefix} Flow Timeout
+  STR_UI_FLOW_STRENGTH: ${prefix} Flow strength
+  
+  
+  
+  
 
 esphome:
   name: ${unitname}
@@ -130,8 +146,10 @@ dallas:
   - id: htc_output_temperature
     pin: ${inp_sensor_water}
     update_interval: 1s
-#  - id: hottub_temperature
-#    pin: ${inp_sensor_hottub}
+  - id: hottub_temperature
+    pin: ${inp_sensor_hottub}
+    update_interval: 1s
+
     
 output:
   - platform: esp32_dac
@@ -160,11 +178,12 @@ output:
           then:
             lambda: id(htc_dac_motor_hot).set_level(0);
           else:
-            lambda: |- 
+            lambda: |-
               if (id(htc_current_temp).state < id(max_temperature)) {
-                float v = state + id(htc_flow_strength).state/100.0;
-                if (v > 1) v = 1;
-                id(htc_dac_motor_hot).set_level(v);
+                float y = 0.41 * state + id(htc_flow_strength).state/100;;
+                if (y > 1) y = 1;
+                if (y < 0) y = 0;
+                id(htc_dac_motor_hot).set_level(y);
               }
               else {
                 ESP_LOGW("custom", "Overheating - cooling triggered");
@@ -183,17 +202,19 @@ output:
           then:
             lambda: id(htc_dac_motor_cold).set_level(0);
           else:
-            lambda: |- 
+            lambda: |-
               if (id(htc_current_temp).state < id(max_temperature)) {
-                float v = state + id(htc_flow_strength).state/100;
-                if (v > 1) v = 1;
-                id(htc_dac_motor_cold).set_level(v);
+                float y = 0.41 * state + id(htc_flow_strength).state/100;
+                if (y > 1) y = 1;
+                if (y < 0) y = 0;
+                id(htc_dac_motor_cold).set_level(y);
               }
               else {
                 ESP_LOGW("custom", "Overheating - cooling triggered");
                 id(htc_dac_motor_hot).set_level(0);
                 id(htc_dac_motor_cold).set_level(1);
               }
+
       - script.execute: run_timeout
 
 
@@ -205,6 +226,13 @@ switch:
     optimistic: true
     turn_on_action:
       - climate.pid.autotune: htc_pid_ctrl
+
+text_sensor:
+  # Current cold flow  
+  - platform: template
+    name: ${STR_SENSOR_FLOW_CNTD}
+    id: htc_flow_countdown
+    icon: mdi:clock-start
       
 sensor:
   #-----------------------------------------------------------------------------
@@ -231,15 +259,106 @@ sensor:
     id: htc_cold_flow_percentage
     name: ${STR_SENSOR_CLD_FLOW}
     unit_of_measurement: '%'
-  
 
   #-----------------------------------------------------------------------------
-  # Current temperature
+  # Uptime
+  - platform: uptime
+    name: ${STR_SENSOR_UPTIME}
+    id: htc_uptime
+    update_interval: 5s
+    on_raw_value:
+      then:
+        - text_sensor.template.publish:
+            id: htc_flow_countdown
+            state: !lambda |-
+              static float starttime = 0;
+              if (id(htc_pid_ctrl).mode == CLIMATE_MODE_OFF) {
+                starttime = 0;
+                return "0s";
+              }
+              else {
+                if (starttime == 0)
+                  starttime = id(htc_uptime).raw_state + (id(htc_flow_timeout).state * 60);
+                int seconds = round(starttime - id(htc_uptime).raw_state);
+                int days = seconds / (24 * 3600);
+                seconds = seconds % (24 * 3600);
+                int hours = seconds / 3600;
+                seconds = seconds % 3600;
+                int minutes = seconds /  60;
+                seconds = seconds % 60;
+                return (
+                  (days ? String(days) + "d " : "") +
+                  (hours ? String(hours) + "h " : "") +
+                  (minutes ? String(minutes) + "m " : "") +
+                  (String(seconds) + "s")
+                ).c_str();        
+              }
+
+  #-----------------------------------------------------------------------------
+  # Dallas temperature sensors
+  
+  # Output water
   - platform: dallas
     id: htc_current_temp
+    dallas_id: htc_output_temperature
     address: 0xA80008039D1DC610
     name: ${STR_SENSOR_CUR_TEMP}
 
+  # Sensor 1 (bottom)
+  - platform: dallas
+    id: htc_tub_temp1
+    dallas_id: hottub_temperature
+    address: 0xA90008039CB95810
+    name: ${STR_SENSOR_TUB_TEMP1}
+
+  # Sensor 2
+  - platform: dallas
+    id: htc_tub_temp2
+    dallas_id: hottub_temperature
+    address: 0xC60008039D02CA10
+    name: ${STR_SENSOR_TUB_TEMP2}
+
+  # Sensor 3
+  - platform: dallas
+    id: htc_tub_temp3
+    dallas_id: hottub_temperature
+    address: 0xC40008039D5DC110
+    name: ${STR_SENSOR_TUB_TEMP3}
+
+  # Sensor 4
+  - platform: dallas
+    id: htc_tub_temp4
+    dallas_id: hottub_temperature
+    address: 0xBF0008039C8B4510
+    name: ${STR_SENSOR_TUB_TEMP4}
+
+  # Sensor 5
+  - platform: dallas
+    id: htc_tub_temp5
+    dallas_id: hottub_temperature
+    address: 0x980008039CA9E510
+    name: ${STR_SENSOR_TUB_TEMP5}
+
+  # Sensor 6
+  - platform: dallas
+    id: htc_tub_temp6
+    dallas_id: hottub_temperature
+    address: 0x940008039D15D510
+    name: ${STR_SENSOR_TUB_TEMP6}
+
+  # Sensor 7
+  - platform: dallas
+    id: htc_tub_temp7
+    dallas_id: hottub_temperature
+    address: 0x5B0008039CBE4310
+    name: ${STR_SENSOR_TUB_TEMP7}
+
+  # Sensor 8 (top)
+  - platform: dallas
+    id: htc_tub_temp8
+    dallas_id: hottub_temperature
+    address: 0xAE0008039D42EB10
+    name: ${STR_SENSOR_TUB_TEMP8}
 
   #-----------------------------------------------------------------------------
   # Motor control feedback
@@ -252,8 +371,9 @@ sensor:
     on_value:
       then:
         lambda: |-
-          id(htc_current_flow_percentage).publish_state((id(htc_adc_motor_cold).state + id(htc_adc_motor_hot).state)/2 * id(volt2per));
-          id(htc_cold_flow_percentage).publish_state(id(htc_adc_motor_cold).state * id(volt2per));
+          float coldState = id(htc_adc_motor_cold).state/2; 
+          id(htc_current_flow_percentage).publish_state((coldState + id(htc_adc_motor_hot).state/2) * id(volt2per));
+          id(htc_cold_flow_percentage).publish_state(coldState * id(volt2per));
 
   - platform: adc
     pin: ${inp_motor_hot}
@@ -264,8 +384,9 @@ sensor:
     on_value:
       then:
         lambda: |-
-          id(htc_current_flow_percentage).publish_state((id(htc_adc_motor_cold).state + id(htc_adc_motor_hot).state)/2 * id(volt2per));
-          id(htc_hot_flow_percentage).publish_state(id(htc_adc_motor_hot).state * id(volt2per));
+          float hotState = id(htc_adc_motor_hot).state/2;
+          id(htc_current_flow_percentage).publish_state((id(htc_adc_motor_cold).state/2 + hotState) * id(volt2per));
+          id(htc_hot_flow_percentage).publish_state(hotState * id(volt2per));
     
 
   #-----------------------------------------------------------------------------
@@ -307,19 +428,16 @@ climate:
     heat_output: htc_motor_hot
     cool_output: htc_motor_cold
     control_parameters:
-      kp: 0.15
-      ki: 0.01128
-      kd: 1.87726
-
-#      kp: 0.29103
-#      ki: 0.01128
-#      kd: 1.87726
+      # b = 70
+      kp: 0.06913     # 0.10913
+      ki: 0.00398  # 0.00398
+      kd: 1      # 0.74752
 
     visual:
       min_temperature: 30 °C
       max_temperature: 47 °C
       temperature_step: 0.1 °C
-    
+
   
 script:
   - id: fill_timeout_script
@@ -329,7 +447,9 @@ script:
           float timeout = (id(htc_flow_timeout).state * 1000 * 60); 
           ESP_LOGI("custom", "Timeout is: %f", timeout);
           return timeout;
-      - lambda: id(htc_pid_ctrl).mode = CLIMATE_MODE_OFF; ESP_LOGI("custom", "Timeout");
+      - lambda: |-
+          id(htc_pid_ctrl).mode = CLIMATE_MODE_OFF; 
+          ESP_LOGI("custom", "System stopped, timeout reached.");
       
   - id: run_timeout
     mode: single
@@ -343,8 +463,8 @@ script:
             ESP_LOGI("custom", "Starting timeout");
             id(fill_timeout_script).execute();
           }
-      
-      
+  
+
       
       
       
