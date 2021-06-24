@@ -66,6 +66,8 @@ substitutions:
   
   STR_UI_FLOW_TIMEOUT:        ${prefix} Flow Timeout
   STR_UI_FLOW_STRENGTH:       ${prefix} Flow strength
+  STR_UI_MANUAL_COLD:         ${prefix} Manual Cold
+  STR_UI_MANUAL_HOT:          ${prefix} Manual Hot
   
   
   
@@ -118,10 +120,10 @@ globals:
     type: float
     initial_value: '0'
     
-    # Valid states are: STANDBY, FILLING, MANUAL, DEFREEZING
-  - id: state
-    type: String
-    initial_value: ''
+    # Valid states are 0:CLIMATE, 1:DEFREEZING, 2:MANUAL
+  - id: ctrl_state
+    type: int
+    initial_value: '0'
 
 
 dallas:
@@ -155,22 +157,34 @@ output:
     id: htc_motor_hot
     write_action:
       - lambda: |-
-          if (id(htc_pid_ctrl).mode == CLIMATE_MODE_OFF)
-            id(htc_dac_motor_hot).set_level(0);
-          else {
-            if (id(htc_current_temp).state < id(max_temperature)) {
-              float y = 0.41 * state + id(htc_flow_strength).state/100;
-              if (y > 1) y = 1;
-              if (y < 0) y = 0;
-              id(htc_dac_motor_hot).set_level(y);
-            }
-            else {
-              ESP_LOGW("custom", "Overheating - cooling triggered");
-              id(htc_dac_motor_hot).set_level(0);
-              id(htc_dac_motor_cold).set_level(1);
-            }
-            if (!id(run_timeout).is_running())
-              id(run_timeout).execute();
+          switch (id(ctrl_state)) {
+            case 0:
+              if (id(htc_pid_ctrl).mode == CLIMATE_MODE_OFF)
+                id(htc_dac_motor_hot).set_level(0);
+              else {
+                if (id(htc_current_temp).state < id(max_temperature)) {
+                  float y = 0.41 * state + id(htc_flow_strength).state/100;
+                  if (y > 1) y = 1;
+                  if (y < 0) y = 0;
+                  id(htc_dac_motor_hot).set_level(y);
+                }
+                else {
+                  ESP_LOGW("custom", "Overheating - cooling triggered");
+                  id(htc_dac_motor_hot).set_level(0);
+                  id(htc_dac_motor_cold).set_level(1);
+                }
+                if (!id(run_timeout).is_running())
+                  id(run_timeout).execute();
+              }
+              break;
+            
+            case 1:
+              break;
+              
+            case 2:
+              ESP_LOGW("custom", "MANUAL - Hot motor value: %f", id(htc_manual_hot).state/100);
+              id(htc_dac_motor_hot).set_level(id(htc_manual_hot).state/100);
+              break;
           }
 
   - platform: template
@@ -178,22 +192,31 @@ output:
     id: htc_motor_cold
     write_action:
       - lambda: |-
-          if (id(htc_pid_ctrl).mode == CLIMATE_MODE_OFF)
-            id(htc_dac_motor_cold).set_level(0);
-          else {
-            if (id(htc_current_temp).state < id(max_temperature)) {
-              float y = 0.41 * state + id(htc_flow_strength).state/100;
-              if (y > 1) y = 1;
-              if (y < 0) y = 0;
-              id(htc_dac_motor_cold).set_level(y);
-            }
-            else {
-              ESP_LOGW("custom", "Overheating - cooling triggered");
-              id(htc_dac_motor_hot).set_level(0);
-              id(htc_dac_motor_cold).set_level(1);
-            }
-            if (!id(run_timeout).is_running())
-              id(run_timeout).execute();
+          switch (id(ctrl_state)) {
+            case 0:
+              if (id(htc_pid_ctrl).mode == CLIMATE_MODE_OFF)
+                id(htc_dac_motor_cold).set_level(0);
+              else {
+                if (id(htc_current_temp).state < id(max_temperature)) {
+                  float y = 0.41 * state + id(htc_flow_strength).state/100;
+                  if (y > 1) y = 1;
+                  if (y < 0) y = 0;
+                  id(htc_dac_motor_cold).set_level(y);
+                }
+                else {
+                  ESP_LOGW("custom", "Overheating - cooling triggered");
+                  id(htc_dac_motor_hot).set_level(0);
+                  id(htc_dac_motor_cold).set_level(1);
+                }
+                if (!id(run_timeout).is_running())
+                  id(run_timeout).execute();
+              }
+              break;
+              
+            case 2:
+              ESP_LOGW("custom", "MANUAL - Cold motor value: %f", id(htc_manual_cold).state/100);
+              id(htc_dac_motor_cold).set_level(id(htc_manual_cold).state/100);
+              break;
           }
           
 switch:
@@ -205,8 +228,8 @@ switch:
     turn_on_action:
       - climate.pid.autotune: htc_pid_ctrl
 
+
   #-----------------------------------------------------------------------------
-  #
 text_sensor:
   - platform: template
     name: ${STR_SENSOR_FLOW_SEC}
@@ -220,6 +243,41 @@ text_sensor:
 
 
 sensor:
+  #-----------------------------------------------------------------------------
+  - platform: homeassistant
+    name: ${STR_UI_STATE}
+    entity_id: input_number.htc_control_mode
+    id: htc_control_mode
+    on_value:
+      then:
+        - if:
+            condition: 
+              lambda: return (x == 2);
+            then:
+              lambda: |-
+                ESP_LOGI("custom", "Control Mode: Manual");
+                id(ctrl_state) = 2;
+            else:
+              - if:
+                  condition:
+                    lambda: return (x == 1);
+                  then:
+                    lambda: |-
+                      ESP_LOGI("custom", "Control Mode: Defreezing");
+                      id(ctrl_state) = 1;
+                      id(run_defreezing_mode).stop();
+                      id(run_defreezing_mode).execute();
+                  else:
+                    - if:
+                        condition: 
+                          lambda: return (x == 0);
+                        then:
+                          lambda: |-
+                            ESP_LOGI("custom", "Control Mode: Climate");
+                            id(ctrl_state) = 0;
+                          
+
+
   #-----------------------------------------------------------------------------
   # Target flow
   - platform: template
@@ -419,7 +477,17 @@ sensor:
     name: ${STR_UI_FLOW_STRENGTH}
     entity_id: input_number.htc_flow_strength
     id: htc_flow_strength
-    
+   
+  - platform: homeassistant
+    name: ${STR_UI_MANUAL_HOT}
+    entity_id: input_number.htc_manual_hot
+    id: htc_manual_hot
+
+  - platform: homeassistant
+    name: ${STR_UI_MANUAL_COLD}
+    entity_id: input_number.htc_manual_cold
+    id: htc_manual_cold
+
 
 climate:
   - platform: pid
@@ -446,9 +514,10 @@ script:
     mode: restart   
     then:
       - delay: !lambda |-
+          id(ctrl_state) = 0;
           ESP_LOGI("custom", "Starting timeout, system ON");
           id(endtime) = id(htc_uptime_sec).raw_state + (id(htc_flow_timeout).state * 60);
-          float timeout = (id(htc_flow_timeout).state * 1000 * 60); // Milliseconds 
+          float timeout = (id(htc_flow_timeout).state * 1000 * 60); 
           ESP_LOGI("custom", "Timeout is: %f", timeout);
           return timeout;
       - lambda: |-
@@ -456,6 +525,15 @@ script:
           id(htc_pid_ctrl).mode = CLIMATE_MODE_OFF; 
           id(endtime) = 0;
 
+  - id: run_defreezing_mode
+    mode: restart
+    then:
+      - lambda: |-
+          id(htc_dac_motor_hot).set_level(0.65);
+      - delay: 10s
+      - lambda: |-
+          id(htc_dac_motor_hot).set_level(0.5);
+      
 
       
       
