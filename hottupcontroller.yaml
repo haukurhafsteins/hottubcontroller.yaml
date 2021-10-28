@@ -1,77 +1,11 @@
 #------------------------------------------------------------------------------
 # 
 substitutions:
-  unitname: hottubcontroller
-  prefix: HTC
+  unitname: htc2
+  prefix: HTC2
 
-  # Inputs
-  inp_motor_cold:       GPIO36
-  inp_motor_hot:        GPIO39
-  inp_kb_on:            GPIO27
-  inp_kb_page:          GPIO14
-  inp_kb_inc:           GPIO12
-  inp_kb_dec:           GPIO13
-  inp_sensor_water:     GPIO5
-  inp_sensor_hottub:    GPIO32
-  inp_sensor_extra:     GPIO33
-  inp_sensor_temp_int:  GPIO17
-  inp_sensor_hum_int:   GPIO16
-
-  # Outputs
-  outp_buzzer:          GPIO19
-  outp_led:             GPIO0
-  outp_motor_hot:       GPIO25
-  outp_motor_cold:      GPIO26
-  outp_disp_blank:      GPIO15
-
-  # Other
-  spi_clock:            GPIO18
-  spi_mosi:             GPIO23
-  
-  # String definitions
-  STR_BTN_ON:                 ${prefix} System ON
-  STR_BTN_FLOW_INC:           ${prefix} Increment Flow
-  STR_BTN_FLOW_DEC:           ${prefix} Decrement Flow
-  STR_BTN_TEMP_INC:           ${prefix} Increment Temperature
-  STR_BTN_TEMP_DEC:           ${prefix} Decrement Temperature
-  STR_BTN_PID_ATUNE:          ${prefix} PID Autotune
-
-  STR_SENSOR_TAR_FLOW:        ${prefix} Target Flow
-  STR_SENSOR_CUR_FLOW:        ${prefix} Current Flow
-  STR_SENSOR_HOT_FLOW:        ${prefix} Hot Water Flow
-  STR_SENSOR_CLD_FLOW:        ${prefix} Cold Water Flow
-
-  STR_SENSOR_FLOW_SEC:        ${prefix} Flow countdown
-  STR_SENSOR_OUT_TEMP:        ${prefix} Output Temperature
-
-  STR_SENSOR_TUB_TEMP1:       ${prefix} Tub Temperature 1
-  STR_SENSOR_TUB_TEMP2:       ${prefix} Tub Temperature 2
-  STR_SENSOR_TUB_TEMP3:       ${prefix} Tub Temperature 3
-  STR_SENSOR_TUB_TEMP4:       ${prefix} Tub Temperature 4
-  STR_SENSOR_TUB_TEMP5:       ${prefix} Tub Temperature 5
-  STR_SENSOR_TUB_TEMP6:       ${prefix} Tub Temperature 6
-  STR_SENSOR_TUB_TEMP7:       ${prefix} Tub Temperature 7
-  STR_SENSOR_TUB_TEMP8:       ${prefix} Tub Temperature 8
-
-  STR_SENSOR_MOT_HOT:         ${prefix} Hot Motor Fb Voltage
-  STR_SENSOR_MOT_COLD:        ${prefix} Cold Motor Fb Voltage
-  
-  STR_SENSOR_SEC_SINCE_START: ${prefix} Seconds since startup
-  STR_SENSOR_UPTIME:          ${prefix} Uptime
-  
-  STR_INTERNAL_TEMP:          ${prefix} Internal Temperature
-  STR_INTERNAL_HUM:           ${prefix} Internal Humidity
-
-  STR_CLIMATE_PID:            ${prefix} PID Control
-  STR_CLIMATE_PID_DEFREEZE:   ${prefix} PID Control Defreeze
-  
-  STR_UI_FLOW_TIMEOUT:        ${prefix} Flow Timeout
-  STR_UI_FLOW_STRENGTH:       ${prefix} Flow strength
-  STR_UI_MANUAL_COLD:         ${prefix} Manual Cold
-  STR_UI_MANUAL_HOT:          ${prefix} Manual Hot
-  STR_UI_FORCE_CTRL_MODE:     ${prefix} Force Control Mode
-  
-  
+  <<: !include ../htc2_pins.yaml
+  <<: !include ../htc2_strings.yaml
   
 
 esphome:
@@ -83,6 +17,10 @@ esphome:
 
 #  libraries:
 #    - TFT_eSPI
+  on_boot:
+    - wait_until:
+        api.connected:
+    - lambda: id(id_stop_climate).execute();
 
 wifi:
   <<: !include ../wifi.yaml
@@ -97,21 +35,25 @@ logger:
   level: INFO
 
 api:
-#i2c:
 ota:
 
 #web_server:
 #  port: 80
 
+font:
+  - file: 'arial.ttf'
+    id: font1
+    size: 12
+    
 globals:
-  # Constant
+  # Constants
   - id: per2volt
     type: float
-    initial_value: '0.0075'
+    initial_value: '0.01' # DAC is controlled with 0..1 where 1 becomes VCC (3.3v)
 
   - id: volt2per
     type: float
-    initial_value: '36.635'
+    initial_value: '25.64'# ADC reads max 3.9v (11db) which becomes 100 
 
   - id: max_temperature
     type: float
@@ -136,144 +78,222 @@ globals:
   - id: ctrl_state
     type: int
     initial_value: '-1'
+    
+  - id: a_const
+    type: float
+    initial_value: '1'
 
+# Example configuration entry
+i2c:
+  sda: GPIO21
+  scl: GPIO22
 
+spi:
+  clk_pin: GPIO18
+  mosi_pin: GPIO23
+
+display:
+  - platform: ssd1306_i2c
+    id: iic_display
+    model: "SSD1306 128x64"
+    address: 0x3C
+    pages:
+      - id: valve_opening
+        lambda: |-
+          it.line(0, 0, 128, 0);
+          it.printf(64, 5, id(font1), TextAlign::TOP_CENTER, "Hottub Controller V2");
+          it.line(0, 20, 128, 20);
+          it.printf(3, 23, id(font1), TextAlign::TOP_LEFT, "T: %.1f°, %.1f%%, %.1f%%", id(id_inflow_temp).state, id(id_motor_hot), id(id_motor_cold));
+          if (id(ctrl_state) == id(STATE_CLIMATE))
+            it.printf(3, 43, id(font1), TextAlign::TOP_LEFT, "State: CLIMATE");
+          else if (id(ctrl_state) == id(STATE_MANUAL))
+            it.printf(3, 43, id(font1), TextAlign::TOP_LEFT, "State: MANUAL");
+          else if (id(ctrl_state) == id(STATE_DEFREEZING))
+            it.printf(3, 43, id(font1), TextAlign::TOP_LEFT, "State: DEFREEZING");
+
+  - platform: st7789v
+    backlight_pin: GPIO13
+    cs_pin: GPIO13
+    dc_pin: GPIO2
+    reset_pin: GPIO4
+    lambda: |-
+      it.print(0, 0, id(font1), "Hello World!");
+      
 dallas:
-  - id: htc_output_temperature
-    pin: ${inp_sensor_water}
+  - id: id_output_temperature
+    pin: ${inp_sensor_1}
     update_interval: 1s
+
 #  - id: hottub_temperature
-#    pin: ${inp_sensor_hottub}
+#    pin: ${inp_sensor_2}
 #    update_interval: 1s
+
+#  - id: hottub_defreeze_temperature
+#    pin: ${inp_sensor_3}
+#    update_interval: 5s
 
     
 output:
   - platform: esp32_dac
-    pin: ${outp_motor_hot}
-    id: htc_dac_motor_hot
+    pin: ${outp_da1}
+    id: id_da1_motor_hot
 
   - platform: esp32_dac
-    pin: ${outp_motor_cold}
-    id: htc_dac_motor_cold
-    
-  - platform: gpio
-    pin: ${outp_buzzer}
-    id: gpio_buzzer
-
-  - platform: gpio
-    pin: ${outp_led}
-    id: gpio_led
+    pin: ${outp_da2}       
+    id: id_da2_motor_cold
 
   - platform: template
     type: float
-    id: htc_motor_hot
+    id: id_motor_hot
     write_action:
       - lambda: |-
           if (id(ctrl_state) == id(STATE_CLIMATE)) {
-            if (id(htc_pid_ctrl).mode == CLIMATE_MODE_OFF) {
-              id(htc_dac_motor_hot).set_level(0);
+            if (id(id_pid_ctrl).mode == CLIMATE_MODE_OFF) {
+              id(id_da1_motor_hot).set_level(0);
             }
-            else if (id(htc_pid_ctrl).mode != CLIMATE_MODE_OFF) {
-              if (id(htc_current_temp).state < id(max_temperature)) {
-                float y = 0.41 * state + id(htc_flow_strength).state/100;
+            else if (id(id_pid_ctrl).mode != CLIMATE_MODE_OFF) {
+              if (id(id_inflow_temp).state < id(max_temperature)) {
+                float y = id(a_const) * state + id(id_flow_strength).state * id(per2volt);
                 if (y > 1) y = 1;
                 if (y < 0) y = 0;
-                id(htc_dac_motor_hot).set_level(y);
+                id(id_da1_motor_hot).set_level(y);
               }
               else
-                id(run_overheating).execute();
+                id(id_run_overheating).execute();
 
-              if (!id(run_timeout).is_running())
-                id(run_timeout).execute();
+              if (!id(id_run_timeout).is_running())
+                id(id_run_timeout).execute();
             }
           }
 
   - platform: template
     type: float
-    id: htc_motor_cold
+    id: id_motor_cold
     write_action:
       - lambda: |-
           if (id(ctrl_state) == id(STATE_CLIMATE)) {
-            if (id(htc_pid_ctrl).mode == CLIMATE_MODE_OFF)
-              id(htc_dac_motor_cold).set_level(0);
-            else if (id(htc_pid_ctrl).mode != CLIMATE_MODE_OFF) {
-              if (id(htc_current_temp).state < id(max_temperature)) {
-                float y = 0.41 * state + id(htc_flow_strength).state/100;
+            if (id(id_pid_ctrl).mode == CLIMATE_MODE_OFF)
+              id(id_da2_motor_cold).set_level(0);
+            else if (id(id_pid_ctrl).mode != CLIMATE_MODE_OFF) {
+              if (id(id_inflow_temp).state < id(max_temperature)) {
+                float y = id(a_const) * state + id(id_flow_strength).state * id(per2volt);
                 if (y > 1) y = 1;
                 if (y < 0) y = 0;
-                id(htc_dac_motor_cold).set_level(y);
+                id(id_da2_motor_cold).set_level(y);
               }
               else
-                id(run_overheating).execute();
+                id(id_run_overheating).execute();
                 
-              if (!id(run_timeout).is_running())
-                id(run_timeout).execute();
+              if (!id(id_run_timeout).is_running())
+                id(id_run_timeout).execute();
             }
           }
 
   - platform: template
     type: float
-    id: htc_motor_hot_defreeze
+    id: id_motor_hot_defreeze
     write_action:
       - lambda: |-
           if (id(ctrl_state) == id(STATE_DEFREEZING)) {
-            if (id(htc_current_temp).state < id(max_temperature)) {
-              float y = state + 0.5;
-              if (y > 0.7) y = 0.7;
-              if (y < 0) y = 0;
-              id(htc_dac_motor_hot).set_level(y);
-              id(htc_dac_motor_cold).set_level(0);
-            }
-            else 
-              id(run_overheating).execute();
+            //if (id(id_inflow_temp).state < id(max_temperature)) {
+              float m = id(id_max_defreeze).state * id(per2volt);
+              float b = id(id_min_defreeze).state * id(per2volt);
+              float a = m - b;
+              float y = a * state + b;
+              //ESP_LOGI("custom", "Y = %.3f * %.3f + %.3f = %.3f", a, state, b, y);
+              id(id_da1_motor_hot).set_level(y);
+              id(id_da2_motor_cold).set_level(0);
+            //}
+            //else 
+            //  id(id_run_overheating).execute();
           }
           
 switch:
   #-----------------------------------------------------------------------------
-  # Temperature control
+  # PID autotune, Kp, Ki and Kd must be set to zero.
   - platform: template
     name: ${STR_BTN_PID_ATUNE}
     optimistic: true
+    turn_off_action:
+      - climate.pid.autotune: id_pid_ctrl
+      - lambda: ESP_LOGI("custom", "Autotune OFF");
     turn_on_action:
-      - climate.pid.autotune: htc_pid_ctrl
+      - climate.pid.autotune: id_pid_ctrl
+      - lambda: ESP_LOGI("custom", "Autotune ON");
+      
+  - platform: gpio
+    pin: ${outp_rel1}
+    name: ${STR_OUTPUT_REL1}
+    id: id_gpio_rel1
+
+  - platform: gpio
+    pin: ${outp_rel2}
+    name: ${STR_OUTPUT_REL2}
+    id: id_gpio_rel2
+
+  - platform: gpio
+    pin: ${outp_rel3}
+    name: ${STR_OUTPUT_REL3}
+    id: id_gpio_rel3
+
+  - platform: gpio
+    pin: ${outp_rel4}
+    name: ${STR_OUTPUT_REL4}
+    id: id_gpio_rel4
+
+  - platform: gpio
+    pin: ${outp_rel5}
+    name: ${STR_OUTPUT_REL5}
+    id: id_gpio_rel5
+    
+  - platform: gpio
+    pin: ${outp_rel6}
+    name: ${STR_OUTPUT_REL6}
+    id: id_gpio_rel6
 
 
   #-----------------------------------------------------------------------------
 text_sensor:
   - platform: template
     name: ${STR_SENSOR_FLOW_SEC}
-    id: htc_flow_countdown_txt
+    id: id_flow_countdown_txt
     icon: mdi:clock-start
       
   - platform: template
     name: ${STR_SENSOR_UPTIME}   
-    id: htc_uptime_txt
+    id: id_uptime_txt
     icon: mdi:clock-start
 
 
 sensor:
+  - platform: aht10
+    temperature:
+      name: ${STR_INTERNAL_TEMP}
+    humidity:
+      name: ${STR_INTERNAL_HUM}
+    update_interval: 5s
   #-----------------------------------------------------------------------------
   # Target flow
   - platform: template
-    id: htc_target_flow_percentge
+    id: id_target_flow_percentge
     name: ${STR_SENSOR_TAR_FLOW}
     unit_of_measurement: '%'
     
   # Current flow  
   - platform: template
-    id: htc_current_flow_percentage
+    id: id_current_flow_percentage
     name: ${STR_SENSOR_CUR_FLOW}
     unit_of_measurement: '%'
 
   # Current hot flow  
   - platform: template
-    id: htc_hot_flow_percentage
+    id: id_hot_flow_percentage
     name: ${STR_SENSOR_HOT_FLOW}
     unit_of_measurement: '%'
 
   # Current cold flow  
   - platform: template
-    id: htc_cold_flow_percentage
+    id: id_cold_flow_percentage
     name: ${STR_SENSOR_CLD_FLOW}
     unit_of_measurement: '%'
 
@@ -281,18 +301,18 @@ sensor:
   # Uptime
   - platform: uptime
     name: ${STR_SENSOR_SEC_SINCE_START}  
-    id: htc_uptime_sec
+    id: id_uptime_sec
     update_interval: 5s
     internal: true
     on_raw_value:
       then:
         - text_sensor.template.publish:
-            id: htc_flow_countdown_txt
+            id: id_flow_countdown_txt
             state: !lambda |-
-              if (id(htc_pid_ctrl).mode == CLIMATE_MODE_OFF)
+              if (id(id_pid_ctrl).mode == CLIMATE_MODE_OFF)
                 return "0s";
               else {
-                int seconds = round(id(endtime) - id(htc_uptime_sec).raw_state);
+                int seconds = round(id(endtime) - id(id_uptime_sec).raw_state);
                 int days = seconds / (24 * 3600);
                 seconds = seconds % (24 * 3600);
                 int hours = seconds / 3600;
@@ -307,9 +327,9 @@ sensor:
                 ).c_str();        
               }
         - text_sensor.template.publish:
-            id: htc_uptime_txt
+            id: id_uptime_txt
             state: !lambda |-
-              int seconds = round(id(htc_uptime_sec).raw_state);
+              int seconds = round(id(id_uptime_sec).raw_state);
               int days = seconds / (24 * 3600);
               seconds = seconds % (24 * 3600);
               int hours = seconds / 3600;
@@ -330,13 +350,14 @@ sensor:
   # Output water. Because this sensor is updated every second, this is the best
   # place to check the state.
   - platform: dallas
-    id: htc_current_temp
-    dallas_id: htc_output_temperature
+    id: id_inflow_temp
+    dallas_id: id_output_temperature
     address: 0xA80008039D1DC610
     name: ${STR_SENSOR_OUT_TEMP}
     on_value:
       then:
-        - lambda: id(check_state).execute();
+        - display.page.show: valve_opening
+        - lambda: id(id_check_state).execute();
 
 
   # Sensor 1 (bottom)
@@ -398,121 +419,164 @@ sensor:
   #-----------------------------------------------------------------------------
   # Motor control feedback
   - platform: adc
-    pin: ${inp_motor_cold}
-    name: ${STR_SENSOR_MOT_COLD}
-    id: htc_adc_motor_cold
+    pin: ${inp_ad1}
+    name: ${STR_SENSOR_MOT_HOT}
+    id: id_adc1_motor_hot
     attenuation: 11db
     update_interval: 1s
     on_value:
       then:
         lambda: |-
-          float coldState = id(htc_adc_motor_cold).state/2; 
-          id(htc_current_flow_percentage).publish_state((coldState + id(htc_adc_motor_hot).state/2) * id(volt2per));
-          id(htc_cold_flow_percentage).publish_state(coldState * id(volt2per));
+          {
+            float hotState = id(id_adc1_motor_hot).state;
+            id(id_hot_flow_percentage).publish_state(hotState * id(volt2per));
+
+            float a = 100.0/(100.0-id(id_min_defreeze).state);
+            float b = -a * id(id_min_defreeze).state;
+            float x = (id(id_adc2_motor_cold).state + hotState)/2*id(volt2per);
+            float y = a * x + b;
+            if (y < 0) y = 0;
+            id(id_current_flow_percentage).publish_state(y);
+          }
 
   - platform: adc
-    pin: ${inp_motor_hot}
-    name: ${STR_SENSOR_MOT_HOT}
-    id: htc_adc_motor_hot
+    pin: ${inp_ad2}       
+    name: ${STR_SENSOR_MOT_COLD}
+    id: id_adc2_motor_cold
     attenuation: 11db
     update_interval: 1s
     on_value:
       then:
         lambda: |-
-          float hotState = id(htc_adc_motor_hot).state/2;
-          id(htc_current_flow_percentage).publish_state((id(htc_adc_motor_cold).state/2 + hotState) * id(volt2per));
-          id(htc_hot_flow_percentage).publish_state(hotState * id(volt2per));
-    
+          {
+            float coldState = id(id_adc2_motor_cold).state; 
+            id(id_cold_flow_percentage).publish_state(coldState * id(volt2per));
+  
+            float a = 100.0/(100.0-id(id_min_defreeze).state);
+            float b = -a * id(id_min_defreeze).state;
+            float x = (id(id_adc1_motor_hot).state + coldState)/2*id(volt2per);
+            float y = a * x + b;
+            if (y < 0) y = 0;
+            id(id_current_flow_percentage).publish_state(y);
+          }
 
   #-----------------------------------------------------------------------------
-  # Inhouse values
-  - platform: dht
-    pin: ${inp_sensor_hum_int}
-    id: board_sensor
-    temperature:
-      name: ${STR_INTERNAL_TEMP}
-      id: inhouse_temperature
-    humidity:
-      name: ${STR_INTERNAL_HUM}
-      id: inhouse_humidity
-    update_interval: 10s
+  # Motor control feedback
+  - platform: adc
+    pin: ${inp_ad3}       
+    name: ${STR_SENSOR_AD3}
+    id: id_adc3
+    attenuation: 11db
+    update_interval: 1s
+
+  - platform: adc
+    pin: ${inp_ad4}       
+    name: ${STR_SENSOR_AD4}
+    id: id_adc4
+    attenuation: 11db
+    update_interval: 1s
 
   #-----------------------------------------------------------------------------
   # Interface values in homeassistant
   - platform: homeassistant
     name: ${STR_UI_FLOW_TIMEOUT}
-    entity_id: input_number.htc_flow_timeout
-    id: htc_flow_timeout
+    entity_id: input_number.htc2_flow_timeout
+    id: id_flow_timeout
     on_value:
       then:
         - lambda: |-
-            ESP_LOGI("custom", "New timeout: %.0f minutes", id(htc_flow_timeout).state);
-            if (id(htc_pid_ctrl).mode != CLIMATE_MODE_OFF) {
-              id(run_timeout).stop();
-              id(run_timeout).execute();
+            ESP_LOGI("custom", "New timeout: %.0f minutes", id(id_flow_timeout).state);
+            if (id(id_pid_ctrl).mode != CLIMATE_MODE_OFF) {
+              id(id_run_timeout).stop();
+              id(id_run_timeout).execute();
             }
 
   - platform: homeassistant
     name: ${STR_UI_FLOW_STRENGTH}
-    entity_id: input_number.htc_flow_strength
-    id: htc_flow_strength
-  
-  - platform: homeassistant
-    name: ${STR_UI_MANUAL_HOT}
-    entity_id: input_number.htc_manual_hot
-    id: htc_manual_hot
+    entity_id: input_number.htc2_flow_strength
+    id: id_flow_strength
     on_value:
       then:
         - lambda: |-
-            if (id(ctrl_state) == id(STATE_MANUAL)) {
-              if (id(htc_current_temp).state < id(max_temperature)) {
-                ESP_LOGI("custom", "Manual hot : %.2f", id(htc_manual_hot).state);
-                id(htc_dac_motor_hot).set_level(id(htc_manual_hot).state);
-              }
-              else
-                id(run_overheating).execute();
-            }
+            id(a_const) = (100.0-id(id_flow_strength).state)/100.0;
+            ESP_LOGI("custom", "New a const: %.2f", id(a_const));
+            id(id_set_manual_hot).execute();
+            id(id_set_manual_cold).execute();
+
+  - platform: homeassistant
+    name: ${STR_UI_DEFREEZE_MAX}
+    entity_id: input_number.htc2_max_defreeze
+    id: id_max_defreeze
+    on_value:
+      then:
+        - lambda: |-
+            ESP_LOGI("custom", "New max defreeze: %.1f", id(id_max_defreeze).state);
+  
+  - platform: homeassistant
+    name: ${STR_UI_DEFREEZE_MIN}
+    entity_id: input_number.htc2_min_defreeze
+    id: id_min_defreeze
+    on_value:
+      then:
+        - lambda: |-
+            ESP_LOGI("custom", "New min defreeze: %.1f", id(id_min_defreeze).state);
+
+  - platform: homeassistant
+    name: ${STR_UI_MANUAL_HOT}
+    entity_id: input_number.htc2_manual_hot
+    id: id_manual_hot
+    on_value:
+      then:
+        - lambda: |-
+            ESP_LOGI("custom", "New manual hot: %.1f", id(id_manual_hot).state);
+            id(id_set_manual_hot).execute();
 
   - platform: homeassistant
     name: ${STR_UI_MANUAL_COLD}
-    entity_id: input_number.htc_manual_cold
-    id: htc_manual_cold
+    entity_id: input_number.htc2_manual_cold
+    id: id_manual_cold
     on_value:
       then:
         - lambda: |-
-            if (id(ctrl_state) == id(STATE_MANUAL)) {
-              if (id(htc_current_temp).state < id(max_temperature)) {
-                ESP_LOGI("custom", "Manual cold: %.2f", id(htc_manual_cold).state);
-                id(htc_dac_motor_cold).set_level(id(htc_manual_cold).state);
-              }
-              else
-                id(run_overheating).execute();
-            }
+            ESP_LOGI("custom", "New manual cold: %.1f", id(id_manual_cold).state);
+            id(id_set_manual_cold).execute();
+
+  - platform: homeassistant
+    name: ${STR_UI_MANUAL_COLD}
+    entity_id: sensor.general_usb1_temperature1
+    id: id_valve_temperature
+    on_value:
+      then:
+        - lambda: |-
+            ESP_LOGI("custom", "New valve temperature: %.1f", id(id_valve_temperature).state);
+            id(id_check_state).execute();
 
 binary_sensor:
   - platform: homeassistant
     name: ${STR_UI_FORCE_CTRL_MODE}
-    entity_id: input_boolean.htc_manual_control
-    id: htc_manual_control
+    entity_id: input_boolean.htc2_manual_control
+    id: id_manual_control
     on_state:
       then:
-        - lambda: if (!id(check_state).is_running()) id(check_state).execute();
-            
+        - lambda: |-
+            if (!id(id_check_state).is_running()) 
+              id(id_check_state).execute();
+
 
 climate:
   #-----------------------------------------------------------------------------
   # PID control for hottub
   - platform: pid
     name: ${STR_CLIMATE_PID}
-    id: htc_pid_ctrl
-    sensor: htc_current_temp
+    id: id_pid_ctrl
+    sensor: id_inflow_temp
     default_target_temperature: 40°C
-    heat_output: htc_motor_hot
-    cool_output: htc_motor_cold
+    heat_output: id_motor_hot
+    cool_output: id_motor_cold
     control_parameters:
-      kp: 0.08913     # 0.10913
-      ki: 0.00398  # 0.00398
-      kd: 1.5      # 0.74752
+      kp: 0.42 #kp: 0.09     # 0.10913
+      ki: 0.012 #ki: 0.00398  # 0.00398
+      kd: 3.7 #kd: 1.5      # 0.74752
     visual:
       min_temperature: 30 °C
       max_temperature: 47 °C
@@ -521,105 +585,128 @@ climate:
   # PID control for defreezing
   - platform: pid
     name: ${STR_CLIMATE_PID_DEFREEZE}
-    id: htc_pid_ctrl_defreeze
-    sensor: htc_current_temp
-    default_target_temperature: 40°C
-    heat_output: htc_motor_hot_defreeze
+    id: id_pid_ctrl_defreeze
+    sensor: id_valve_temperature
+    default_target_temperature: 1°C
+    heat_output: id_motor_hot_defreeze
     control_parameters:
-      kp: 0.09
-      ki: 0.04
-      kd: 6      
+      kp: 0.1
+      ki: 1
+      kd: 3      
     visual:
-      min_temperature: 0 °C
-      max_temperature: 50 °C
+      min_temperature: -2 °C
+      max_temperature: 2 °C
       temperature_step: 0.1 °C
       
       
 script:
-  - id: run_timeout
+  - id: id_run_timeout
     mode: restart   
     then:
       - delay: !lambda |-
-          ESP_LOGI("custom", "System ON, stops after %.0f minutes.", id(htc_flow_timeout).state);
-          id(endtime) = id(htc_uptime_sec).raw_state + (id(htc_flow_timeout).state * 60);
-          return (id(htc_flow_timeout).state * 1000 * 60); 
+          ESP_LOGI("custom", "System ON, stops after %.0f minutes.", id(id_flow_timeout).state);
+          id(endtime) = id(id_uptime_sec).raw_state + (id(id_flow_timeout).state * 60);
+          return (id(id_flow_timeout).state * 1000 * 60); 
       - lambda: |-
           id(endtime) = 0;
           ESP_LOGI("custom", "System OFF, timeout reached.");
-          id(stop_climate).execute(); // Do this last because it stops this script.
+          id(id_stop_climate).execute(); // Do this last because it stops this script.
 
-  - id: run_overheating
+  - id: id_run_overheating
     mode: single
     then:
       - lambda: |-
           ESP_LOGW("custom", "Overheating - cooling triggered");
-          id(htc_dac_motor_hot).set_level(0);
-          id(htc_dac_motor_cold).set_level(1);
+          id(id_da1_motor_hot).set_level(0);
+          id(id_da2_motor_cold).set_level(1);
           
-  - id: check_state
+  - id: id_check_state
     mode: single
     then:
       - lambda: |-
           int newstate = id(STATE_CLIMATE);
           
-          if (id(htc_manual_control).state)
+          if (id(id_manual_control).state)
             newstate = id(STATE_MANUAL);
-          else if (id(htc_pid_ctrl).mode != CLIMATE_MODE_OFF)
+          else if (id(id_pid_ctrl).mode != CLIMATE_MODE_OFF)
             newstate = id(STATE_CLIMATE);
-          else if (id(htc_current_temp).state <= id(htc_pid_ctrl_defreeze).target_temperature)
+          else if (id(id_valve_temperature).state <= id(id_pid_ctrl_defreeze).target_temperature)
             newstate = id(STATE_DEFREEZING);
 
-          if (newstate != id(ctrl_state)) {
+          if (id(ctrl_state) != newstate) {
             id(ctrl_state) = newstate;
             
             if (id(ctrl_state) == id(STATE_CLIMATE)) {
               ESP_LOGI("custom", "Control Mode Climate");
-              id(stop_defreeze).execute();
+              id(id_stop_defreeze).execute();
             }
             else if (id(ctrl_state) == id(STATE_MANUAL)) {
               ESP_LOGI("custom", "Control Mode Manual");
-              id(stop_climate).execute();
-              id(stop_defreeze).execute();
-              id(htc_dac_motor_hot).set_level(id(htc_manual_hot).state);
-              id(htc_dac_motor_cold).set_level(id(htc_manual_cold).state);
+              id(id_stop_climate).execute();
+              id(id_stop_defreeze).execute();
+              id(id_set_manual_hot).execute();
+              id(id_set_manual_cold).execute();
             }
             else if (id(ctrl_state) == id(STATE_DEFREEZING)) {
               ESP_LOGI("custom", "Control Mode Defreezing");
-              auto call = id(htc_pid_ctrl_defreeze).make_call();
-              call.set_mode("HEAT_COOL");
+              auto call = id(id_pid_ctrl_defreeze).make_call();
+              call.set_mode("HEAT");
               call.perform();
             }
           }
           else {
             if (id(ctrl_state) == id(STATE_MANUAL)) {
-              if (id(htc_pid_ctrl_defreeze).mode != CLIMATE_MODE_OFF)
-                id(stop_defreeze).execute();
-              if (id(htc_pid_ctrl).mode != CLIMATE_MODE_OFF)
-                id(stop_climate).execute();
+              if (id(id_pid_ctrl_defreeze).mode != CLIMATE_MODE_OFF)
+                id(id_stop_defreeze).execute();
+              if (id(id_pid_ctrl).mode != CLIMATE_MODE_OFF)
+                id(id_stop_climate).execute();
             }
             else if (id(ctrl_state) == id(STATE_CLIMATE)) {
-              if (id(htc_pid_ctrl_defreeze).mode != CLIMATE_MODE_OFF)
-                id(stop_defreeze).execute();
+              if (id(id_pid_ctrl_defreeze).mode != CLIMATE_MODE_OFF)
+                id(id_stop_defreeze).execute();
             }
           }
 
-  - id: stop_climate
+  - id: id_stop_climate
     then:
       - lambda: |-
-          auto call = id(htc_pid_ctrl).make_call();
+          auto call = id(id_pid_ctrl).make_call();
           call.set_mode("OFF");
           call.perform();
-          id(run_timeout).stop();
+          id(id_run_timeout).stop();
 
-  - id: stop_defreeze
+  - id: id_stop_defreeze
     then:
       - lambda: |-
-          auto call = id(htc_pid_ctrl_defreeze).make_call();
+          auto call = id(id_pid_ctrl_defreeze).make_call();
           call.set_mode("OFF");
           call.perform();
 
-      
-      
+  - id: id_set_manual_hot
+    then:
+      - lambda: |-
+              if (id(ctrl_state) == id(STATE_MANUAL)) {
+                if (id(id_valve_temperature).state < id(max_temperature)) {
+                  float y = (id(a_const) * id(id_manual_hot).state + id(id_flow_strength).state) * id(per2volt);
+                  id(id_da1_motor_hot).set_level(y);
+                  ESP_LOGI("custom", "Manual hot : %.2f, Motor value: %.2f", id(id_manual_hot).state, y);
+                }
+                else
+                  id(id_run_overheating).execute();
+              }
+
+  - id: id_set_manual_cold
+    then:
+      - lambda: |-
+              if (id(ctrl_state) == id(STATE_MANUAL)) {
+                if (id(id_valve_temperature).state < id(max_temperature)) {
+                  float y = (id(a_const) * id(id_manual_cold).state + id(id_flow_strength).state) * id(per2volt);
+                  id(id_da2_motor_cold).set_level(y);
+                  ESP_LOGI("custom", "Manual cold: %.2f, Motor value: %.2f", id(id_manual_cold).state, y);
+                }
+                else
+                  id(id_run_overheating).execute();
+              }
       
       
       
