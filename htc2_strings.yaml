@@ -1,0 +1,53 @@
+# String definitions
+STR_BTN_ON: ${prefix} System ON
+STR_BTN_FLOW_INC: ${prefix} Increment Flow
+STR_BTN_FLOW_DEC: ${prefix} Decrement Flow
+STR_BTN_TEMP_INC: ${prefix} Increment Temperature
+STR_BTN_TEMP_DEC: ${prefix} Decrement Temperature
+STR_BTN_PID_ATUNE: ${prefix} PID Autotune
+
+STR_SENSOR_TAR_FLOW: ${prefix} Target Flow
+STR_SENSOR_CUR_FLOW: ${prefix} Current Flow
+STR_SENSOR_HOT_FLOW: ${prefix} Hot Water Flow
+STR_SENSOR_CLD_FLOW: ${prefix} Cold Water Flow
+
+STR_SENSOR_FLOW_SEC: ${prefix} Flow countdown
+STR_SENSOR_OUT_TEMP: ${prefix} Output Temperature
+
+STR_SENSOR_TUB_TEMP1: ${prefix} Tub Temperature 1
+STR_SENSOR_TUB_TEMP2: ${prefix} Tub Temperature 2
+STR_SENSOR_TUB_TEMP3: ${prefix} Tub Temperature 3
+STR_SENSOR_TUB_TEMP4: ${prefix} Tub Temperature 4
+STR_SENSOR_TUB_TEMP5: ${prefix} Tub Temperature 5
+STR_SENSOR_TUB_TEMP6: ${prefix} Tub Temperature 6
+STR_SENSOR_TUB_TEMP7: ${prefix} Tub Temperature 7
+STR_SENSOR_TUB_TEMP8: ${prefix} Tub Temperature 8
+
+STR_SENSOR_MOT_HOT: ${prefix} Hot Motor Fb Voltage
+STR_SENSOR_MOT_COLD: ${prefix} Cold Motor Fb Voltage
+STR_SENSOR_AD3: ${prefix} ad3
+STR_SENSOR_AD4: ${prefix} ad4
+
+STR_SENSOR_SEC_SINCE_START: ${prefix} Seconds since startup
+STR_SENSOR_UPTIME: ${prefix} Uptime
+
+STR_INTERNAL_TEMP: ${prefix} Internal Temperature
+STR_INTERNAL_HUM: ${prefix} Internal Humidity
+
+STR_CLIMATE_PID: ${prefix} PID Control
+STR_CLIMATE_PID_DEFREEZE: ${prefix} PID Control Defreeze
+
+STR_UI_FLOW_TIMEOUT: ${prefix} Flow Timeout
+STR_UI_FLOW_STRENGTH: ${prefix} Flow strength
+STR_UI_MANUAL_COLD: ${prefix} Manual Cold
+STR_UI_MANUAL_HOT: ${prefix} Manual Hot
+STR_UI_FORCE_CTRL_MODE: ${prefix} Force Control Mode
+STR_UI_DEFREEZE_MIN: ${prefix} Min Defreeze Opening
+STR_UI_DEFREEZE_MAX: ${prefix} Max Defreeze Opening
+
+STR_OUTPUT_REL1: ${prefix} Relay 1
+STR_OUTPUT_REL2: ${prefix} Relay 2
+STR_OUTPUT_REL3: ${prefix} Relay 3
+STR_OUTPUT_REL4: ${prefix} Relay 4
+STR_OUTPUT_REL5: ${prefix} Relay 5
+STR_OUTPUT_REL6: ${prefix} Relay 6

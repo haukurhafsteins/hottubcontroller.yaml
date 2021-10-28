@@ -1,0 +1,29 @@
+# Inputs
+inp_ad1:              GPIO36
+inp_ad2:              GPIO39
+inp_ad3:              GPIO34
+inp_ad4:              GPIO35
+inp_kb_mode:          GPIO12
+inp_kb_inc:           GPIO27
+inp_kb_dec:           GPIO14
+inp_sensor_1:         GPIO32
+inp_sensor_2:         GPIO33
+inp_sensor_3:         GPIO13
+
+# Outputs
+outp_rel1:            GPIO19
+outp_rel2:            GPIO5
+outp_rel3:            GPIO17
+outp_rel4:            GPIO16
+outp_rel5:            GPIO0
+outp_rel6:            GPIO15
+outp_da1:             GPIO25
+outp_da2:             GPIO26
+
+# Other
+spi_clock:            GPIO18
+spi_mosi:             GPIO23
+spi_dc:               GPIO2
+spi_scl:              GPI18
+i2c_clock:            GPIO22
+i2c_sda:              GPIO21
